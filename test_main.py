@@ -154,6 +154,53 @@ def test_inverted_index_and_no_match():
     assert results == []
 
 
+def test_inverted_index_phrase_search():
+    """Phrase mode: tokens must appear consecutively."""
+    from index import InvertedIndex
+
+    idx = InvertedIndex()
+    idx.add("note1", ["I", "love", "cats", "and", "dogs"])
+    idx.add("note2", ["cats", "I", "X", "love"])  # tokens present but not adjacent
+    idx.add("note3", ["I", "love", "dogs"])
+
+    # "I love" as phrase
+    results = idx.search(["I", "love"], phrase=True)
+    note_ids = [nid for nid, _ in results]
+    assert "note1" in note_ids
+    assert "note2" not in note_ids  # "I" at 1, "love" at 2 — not consecutive
+    assert "note3" in note_ids
+
+    # Without phrase, AND mode returns all
+    results = idx.search(["I", "love"], phrase=False)
+    note_ids = [nid for nid, _ in results]
+    assert "note1" in note_ids
+    assert "note2" in note_ids
+    assert "note3" in note_ids
+
+
+def test_inverted_index_phrase_no_match():
+    """Phrase mode: no match when tokens not adjacent."""
+    from index import InvertedIndex
+
+    idx = InvertedIndex()
+    idx.add("note1", ["A", "X", "B"])  # A and B not adjacent
+
+    results = idx.search(["A", "B"], phrase=True)
+    assert results == []
+
+
+def test_inverted_index_phrase_single_token():
+    """Phrase mode with single token is same as AND mode."""
+    from index import InvertedIndex
+
+    idx = InvertedIndex()
+    idx.add("note1", ["hello", "world"])
+
+    results = idx.search(["hello"], phrase=True)
+    note_ids = [nid for nid, _ in results]
+    assert "note1" in note_ids
+
+
 def test_inverted_index_bm25_ranking():
     """Documents with higher TF should rank higher."""
     from index import InvertedIndex

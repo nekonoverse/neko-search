@@ -12,10 +12,10 @@ class SuggestIndex:
     def __init__(self):
         self._entries: list[tuple[str, int]] = []  # (token, df) sorted by token
         self._keys: list[str] = []  # token strings only, for bisect
-        self._postings_ref: dict[str, dict[str, int]] | None = None
+        self._postings_ref: dict[str, dict] | None = None
         self._dirty = False
 
-    def rebuild(self, postings: dict[str, dict[str, int]]) -> None:
+    def rebuild(self, postings: dict[str, dict]) -> None:
         """Rebuild from the inverted index postings."""
         entries = sorted(
             ((token, len(docs)) for token, docs in postings.items()),
@@ -26,7 +26,7 @@ class SuggestIndex:
         self._dirty = False
         logger.info("SuggestIndex rebuilt: %d tokens", len(entries))
 
-    def set_postings_ref(self, postings: dict[str, dict[str, int]]) -> None:
+    def set_postings_ref(self, postings: dict[str, dict]) -> None:
         """Set a reference to the live postings dict for lazy rebuilds."""
         self._postings_ref = postings
         self._dirty = True
