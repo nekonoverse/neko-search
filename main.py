@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from generation import GenerationManager
 from index import InvertedIndex
@@ -96,7 +96,7 @@ class SearchResponse(BaseModel):
 
 
 class TrainRequest(BaseModel):
-    vocab_size: int = 8000
+    vocab_size: int = Field(default=8000, ge=100, le=100000)
 
 
 # --- Endpoints ---
