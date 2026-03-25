@@ -200,8 +200,13 @@ async def suggest(q: str, limit: int = 10):
     if not cleaned:
         return {"suggestions": [], "prefix": ""}
 
-    tokens = state.tokenizer.tokenize(q)
-    prefix = tokens[-1] if tokens else cleaned
+    # Use raw text prefix instead of SentencePiece tokenization.
+    # Japanese has no spaces, so the whole input becomes the prefix.
+    # For spaced languages, use the last whitespace-separated segment.
+    parts = cleaned.split()
+    raw_prefix = parts[-1] if parts else cleaned
+    # SentencePiece tokens start with ▁ (word boundary marker)
+    prefix = "\u2581" + raw_prefix
 
     results = state.suggest.prefix_search(prefix, limit=limit)
     return {"suggestions": results, "prefix": prefix}

@@ -179,6 +179,30 @@ def test_suggest_index_no_match():
     assert si.prefix_search("xyz") == []
 
 
+def test_suggest_index_sentencepiece_prefix():
+    """Verify prefix search works with ▁ word boundary markers (real SentencePiece tokens)."""
+    from suggest import SuggestIndex
+
+    si = SuggestIndex()
+    postings = {
+        "\u2581さんせい": {"n1": 1, "n2": 1},
+        "\u2581さんせつ": {"n1": 1},
+        "\u2581さん": {"n1": 1, "n2": 1, "n3": 1},
+        "\u2581せ": {"n1": 1},
+        "せい": {"n1": 1},
+    }
+    si.rebuild(postings)
+
+    # Raw prefix "さんせ" → prepend ▁ → should match さんせい, さんせつ but NOT さん or せ
+    results = si.prefix_search("\u2581さんせ")
+    tokens = [r["token"] for r in results]
+    assert "\u2581さんせい" in tokens
+    assert "\u2581さんせつ" in tokens
+    assert "\u2581さん" not in tokens
+    assert "\u2581せ" not in tokens
+    assert "せい" not in tokens
+
+
 def test_suggest_index_limit():
     from suggest import SuggestIndex
 
