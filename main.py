@@ -123,35 +123,39 @@ async def version():
 @app.post("/index")
 async def index_note(req: IndexRequest):
     state = _state
-    if not state.tokenizer.loaded:
-        raise HTTPException(status_code=503, detail="SentencePiece model not loaded")
-
-    tokens = state.tokenizer.tokenize(req.text)
-    store.upsert(req.note_id, req.text, tokens, req.published)
-    state.index.add(req.note_id, tokens)
-    state.suggest.mark_dirty()
-    return {"ok": True, "tokens": len(tokens)}
+    if state.tokenizer.loaded:
+        tokens = state.tokenizer.tokenize(req.text)
+        store.upsert(req.note_id, req.text, tokens, req.published)
+        state.index.add(req.note_id, tokens)
+        state.suggest.mark_dirty()
+    else:
+        store.upsert(req.note_id, req.text, [], req.published)
+    return {"ok": True, "tokens": len(tokens) if state.tokenizer.loaded else 0}
 
 
 @app.post("/bulk-index")
 async def bulk_index(req: BulkIndexRequest):
     state = _state
-    if not state.tokenizer.loaded:
-        raise HTTPException(status_code=503, detail="SentencePiece model not loaded")
+    model_loaded = state.tokenizer.loaded
 
     docs = []
     for note in req.notes:
-        tokens = state.tokenizer.tokenize(note.text)
+        if model_loaded:
+            tokens = state.tokenizer.tokenize(note.text)
+        else:
+            tokens = []
         docs.append({
             "note_id": note.note_id,
             "text": note.text,
             "tokens": tokens,
             "published": note.published,
         })
-        state.index.add(note.note_id, tokens)
+        if model_loaded:
+            state.index.add(note.note_id, tokens)
 
     store.bulk_upsert(docs)
-    state.suggest.mark_dirty()
+    if model_loaded:
+        state.suggest.mark_dirty()
     return {"ok": True, "indexed": len(docs)}
 
 

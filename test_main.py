@@ -38,9 +38,10 @@ def test_version():
 # --- Index / Search / Delete (without model) ---
 
 def test_index_without_model():
-    """Index fails when model not loaded."""
+    """Index stores to DB even without model (tokens empty)."""
     resp = client.post("/index", json={"note_id": "abc", "text": "hello"})
-    assert resp.status_code == 503
+    assert resp.status_code == 200
+    assert resp.json()["tokens"] == 0
 
 
 def test_search_without_model():
