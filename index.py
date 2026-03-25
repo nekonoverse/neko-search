@@ -69,30 +69,47 @@ class InvertedIndex:
             del self.postings[token]
 
     def search(self, query_tokens: list[str], limit: int = 20) -> list[tuple[str, float]]:
-        """Search with BM25 scoring.
+        """Search with BM25 scoring (AND mode).
 
+        Only documents containing ALL query tokens are returned.
         Returns list of (note_id, score) sorted by score descending.
         """
         if not query_tokens or self.total_docs == 0:
             return []
 
-        scores: dict[str, float] = defaultdict(float)
-        avgdl = self.avg_doc_length or 1.0
+        # Deduplicate query tokens
+        unique_tokens = list(dict.fromkeys(query_tokens))
 
-        for token in query_tokens:
+        # Collect postings for each token; if any token has no postings, no results
+        token_postings = []
+        for token in unique_tokens:
             posting = self.postings.get(token)
             if not posting:
-                continue
+                return []
+            token_postings.append((token, posting))
 
-            # IDF: log((N - df + 0.5) / (df + 0.5) + 1)
-            df = len(posting)
-            idf = math.log((self.total_docs - df + 0.5) / (df + 0.5) + 1.0)
+        # AND: intersect document sets (start from smallest posting list)
+        token_postings.sort(key=lambda x: len(x[1]))
+        candidates = set(token_postings[0][1].keys())
+        for _, posting in token_postings[1:]:
+            candidates &= posting.keys()
+            if not candidates:
+                return []
 
-            for note_id, tf in posting.items():
-                dl = self.doc_lengths.get(note_id, 0)
-                # BM25 TF component
+        # BM25 scoring on candidates only
+        scores: dict[str, float] = {}
+        avgdl = self.avg_doc_length or 1.0
+
+        for note_id in candidates:
+            score = 0.0
+            dl = self.doc_lengths.get(note_id, 0)
+            for token, posting in token_postings:
+                df = len(posting)
+                idf = math.log((self.total_docs - df + 0.5) / (df + 0.5) + 1.0)
+                tf = posting[note_id]
                 tf_norm = (tf * (K1 + 1)) / (tf + K1 * (1 - B + B * dl / avgdl))
-                scores[note_id] += idf * tf_norm
+                score += idf * tf_norm
+            scores[note_id] = score
 
         # Sort by score descending, take top N
         ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)

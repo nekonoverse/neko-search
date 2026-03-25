@@ -126,6 +126,34 @@ def test_inverted_index_remove():
     assert "note2" in note_ids
 
 
+def test_inverted_index_and_search():
+    """AND mode: only documents containing ALL query tokens are returned."""
+    from index import InvertedIndex
+
+    idx = InvertedIndex()
+    idx.add("note1", ["hello", "world"])
+    idx.add("note2", ["hello", "there"])
+    idx.add("note3", ["goodbye", "world"])
+
+    # Both tokens required
+    results = idx.search(["hello", "world"])
+    note_ids = [nid for nid, _ in results]
+    assert "note1" in note_ids
+    assert "note2" not in note_ids  # missing "world"
+    assert "note3" not in note_ids  # missing "hello"
+
+
+def test_inverted_index_and_no_match():
+    """AND mode: returns empty when a query token exists in no documents."""
+    from index import InvertedIndex
+
+    idx = InvertedIndex()
+    idx.add("note1", ["hello", "world"])
+
+    results = idx.search(["hello", "nonexistent"])
+    assert results == []
+
+
 def test_inverted_index_bm25_ranking():
     """Documents with higher TF should rank higher."""
     from index import InvertedIndex
