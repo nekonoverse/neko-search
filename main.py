@@ -125,11 +125,13 @@ async def index_note(req: IndexRequest):
     state = _state
     if state.tokenizer.loaded:
         tokens = state.tokenizer.tokenize(req.text)
-        store.upsert(req.note_id, req.text, tokens, req.published)
+        if store:
+            store.upsert(req.note_id, req.text, tokens, req.published)
         state.index.add(req.note_id, tokens)
         state.suggest.mark_dirty()
     else:
-        store.upsert(req.note_id, req.text, [], req.published)
+        if store:
+            store.upsert(req.note_id, req.text, [], req.published)
     return {"ok": True, "tokens": len(tokens) if state.tokenizer.loaded else 0}
 
 
@@ -153,7 +155,8 @@ async def bulk_index(req: BulkIndexRequest):
         if model_loaded:
             state.index.add(note.note_id, tokens)
 
-    store.bulk_upsert(docs)
+    if store:
+        store.bulk_upsert(docs)
     if model_loaded:
         state.suggest.mark_dirty()
     return {"ok": True, "indexed": len(docs)}
@@ -180,7 +183,11 @@ async def search(q: str, limit: int = 20):
     if not query_tokens:
         return SearchResponse(note_ids=[], total=0)
 
-    results = state.index.search(query_tokens, limit=limit)
+    # No whitespace in cleaned query → phrase search (tokens must be consecutive)
+    cleaned = preprocess(q)
+    use_phrase = " " not in cleaned
+
+    results = state.index.search(query_tokens, limit=limit, phrase=use_phrase)
     note_ids = [nid for nid, _score in results]
     return SearchResponse(note_ids=note_ids, total=len(note_ids))
 
