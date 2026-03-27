@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from generation import GenerationManager
 from index import InvertedIndex
+from scheduler import AutoTrainScheduler
 from store import DocumentStore
 from suggest import SuggestIndex
 from tokenizer import Tokenizer, preprocess
@@ -25,7 +26,12 @@ logger = logging.getLogger(__name__)
 VERSION = "1"
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 MODEL_PATH = os.path.join(DATA_DIR, "sp.model")
+MODEL_PREV_PATH = os.path.join(DATA_DIR, "sp.model.prev")
 DB_PATH = os.path.join(DATA_DIR, "documents.db")
+
+AUTO_TRAIN_ENABLED = os.environ.get("AUTO_TRAIN_ENABLED", "true").lower() in ("true", "1", "yes")
+AUTO_TRAIN_INTERVAL = int(os.environ.get("AUTO_TRAIN_INTERVAL", "604800"))
+AUTO_TRAIN_MIN_NEW_DOCS = int(os.environ.get("AUTO_TRAIN_MIN_NEW_DOCS", "1000"))
 
 
 @dataclass
@@ -44,11 +50,12 @@ _state = SearchState(
 )
 store: DocumentStore | None = None
 gen_manager = GenerationManager(DATA_DIR)
+scheduler: AutoTrainScheduler | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global store, _state
+    global store, _state, scheduler
     os.makedirs(DATA_DIR, exist_ok=True)
     store = DocumentStore(DB_PATH)
 
@@ -69,8 +76,21 @@ async def lifespan(app: FastAPI):
             MODEL_PATH,
         )
 
+    # Start auto-train scheduler
+    if AUTO_TRAIN_ENABLED:
+        scheduler = AutoTrainScheduler(
+            gen_manager,
+            store,
+            _background_train,
+            interval=AUTO_TRAIN_INTERVAL,
+            min_new_docs=AUTO_TRAIN_MIN_NEW_DOCS,
+        )
+        scheduler.start()
+
     yield
 
+    if scheduler:
+        scheduler.stop()
     if store:
         store.close()
 
@@ -104,6 +124,7 @@ class TrainRequest(BaseModel):
 @app.get("/health")
 async def health():
     state = _state
+    meta = gen_manager.load_meta()
     return {
         "status": "ok",
         "version": VERSION,
@@ -112,6 +133,9 @@ async def health():
         "model_loaded": state.tokenizer.loaded,
         "generation": gen_manager.current_version,
         "building": gen_manager.is_building,
+        "auto_train_enabled": AUTO_TRAIN_ENABLED,
+        "next_check_at": scheduler.next_check_at if scheduler else None,
+        "last_trained_at": meta.created_at if meta else None,
     }
 
 
@@ -310,7 +334,9 @@ def _background_train(vocab_size: int):
             suggest=new_suggest,
         )
 
-        # 8. Copy model to canonical path and clean up temp files
+        # 8. Retain previous model, copy new model to canonical path
+        if os.path.exists(MODEL_PATH):
+            shutil.move(MODEL_PATH, MODEL_PREV_PATH)
         shutil.copy2(new_model_path, MODEL_PATH)
         for ext in (".model", ".vocab"):
             p = f"{new_model_prefix}{ext}"

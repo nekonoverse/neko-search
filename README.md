@@ -79,6 +79,18 @@ curl -X POST "http://localhost:8002/train" -H "Content-Type: application/json" \
 curl "http://localhost:8002/train/status"
 ```
 
+## 自動再学習
+
+コーパスの成長に合わせて語彙を自動で再学習する。環境変数で制御:
+
+| 変数 | デフォルト | 説明 |
+|------|-----------|------|
+| `AUTO_TRAIN_ENABLED` | `true` | 自動再学習の有効/無効 |
+| `AUTO_TRAIN_INTERVAL` | `604800` (7日) | チェック間隔 (秒) |
+| `AUTO_TRAIN_MIN_NEW_DOCS` | `1000` | 前回学習時からの最小新規文書数 |
+
+両条件 (間隔経過 AND 新規文書数) を満たしたときにバックグラウンドで再学習が開始される。再学習中も検索は継続可能 (ゼロダウンタイム)。前世代のモデルは `sp.model.prev` として保持される。
+
 ## Nekonoverse との連携
 
 メインサーバーの `.env` に追加:

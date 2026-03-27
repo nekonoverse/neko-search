@@ -27,6 +27,9 @@ def test_health():
     assert data["model_loaded"] is False
     assert "generation" in data
     assert "building" in data
+    assert "auto_train_enabled" in data
+    assert "next_check_at" in data
+    assert "last_trained_at" in data
 
 
 def test_version():
@@ -405,3 +408,105 @@ def test_search_state():
     )
     assert not state.tokenizer.loaded
     assert state.index.total_docs == 0
+
+
+# --- AutoTrainScheduler ---
+
+def test_scheduler_should_train_no_meta():
+    """Without prior training, should train when enough docs exist."""
+    from generation import GenerationManager
+    from scheduler import AutoTrainScheduler
+    from store import DocumentStore
+
+    gm = GenerationManager(_test_dir)
+    db_path = os.path.join(_test_dir, "test_sched1.db")
+    st = DocumentStore(db_path)
+
+    sched = AutoTrainScheduler(gm, st, lambda v: None, interval=60, min_new_docs=5)
+
+    # No docs yet
+    assert not sched.should_train()
+
+    # Add enough docs
+    for i in range(5):
+        st.upsert(f"s{i}", f"text {i}", ["t"], None)
+
+    assert sched.should_train()
+    st.close()
+
+
+def test_scheduler_should_train_with_meta():
+    """With prior training, requires both time elapsed and new docs."""
+    from generation import GenerationManager
+    from scheduler import AutoTrainScheduler
+    from store import DocumentStore
+
+    gm = GenerationManager(_test_dir)
+    db_path = os.path.join(_test_dir, "test_sched2.db")
+    st = DocumentStore(db_path)
+
+    # Simulate prior training with 10 docs
+    meta = gm.create_active_meta(version=1, vocab_size=8000, doc_count=10)
+    gm.save_meta(meta)
+
+    sched = AutoTrainScheduler(gm, st, lambda v: None, interval=60, min_new_docs=5)
+
+    # Add docs to store
+    for i in range(15):
+        st.upsert(f"m{i}", f"text {i}", ["t"], None)
+
+    # Time hasn't elapsed (created_at is recent)
+    assert not sched.should_train()
+
+    # Backdate the training time
+    meta.created_at = time.time() - 120
+    gm.save_meta(meta)
+
+    # Now both conditions met: 15 - 10 = 5 new docs, 120s > 60s interval
+    assert sched.should_train()
+
+    # Clean up
+    os.unlink(os.path.join(_test_dir, "generation.json"))
+    st.close()
+
+
+def test_scheduler_should_train_blocks_during_build():
+    """Should not train while a build is in progress."""
+    from generation import GenerationManager
+    from scheduler import AutoTrainScheduler
+    from store import DocumentStore
+
+    gm = GenerationManager(_test_dir)
+    db_path = os.path.join(_test_dir, "test_sched3.db")
+    st = DocumentStore(db_path)
+
+    for i in range(10):
+        st.upsert(f"b{i}", f"text {i}", ["t"], None)
+
+    sched = AutoTrainScheduler(gm, st, lambda v: None, interval=60, min_new_docs=5)
+
+    gm.start_build()
+    assert not sched.should_train()
+
+    gm.finish_build()
+    st.close()
+
+
+def test_scheduler_start_stop():
+    """Scheduler thread starts and stops cleanly."""
+    from generation import GenerationManager
+    from scheduler import AutoTrainScheduler
+    from store import DocumentStore
+
+    gm = GenerationManager(_test_dir)
+    db_path = os.path.join(_test_dir, "test_sched4.db")
+    st = DocumentStore(db_path)
+
+    sched = AutoTrainScheduler(gm, st, lambda v: None, interval=3600, min_new_docs=5)
+    sched.start()
+    assert sched._thread is not None
+    assert sched._thread.is_alive()
+
+    sched.stop()
+    assert sched._thread is None
+    st.close()
